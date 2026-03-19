@@ -10,21 +10,17 @@ import asyncio
 import logging
 import queue
 import random
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from rich.console import Group
 from rich.text import Text
 
 import EvoScientist.cli.channel as _ch_mod
-from .channel import (
-    ChannelMessage,
-    _channels_is_running,
-    _channels_running_list,
-    _channels_stop,
-    _auto_start_channel,
-    _message_queue,
-    _set_channel_response,
-)
+
+from ..commands import CommandContext
+from ..commands import manager as cmd_manager
+from ..config.settings import get_config_dir
 from ..sessions import (
     find_similar_threads,
     generate_thread_id,
@@ -33,13 +29,19 @@ from ..sessions import (
     get_thread_metadata,
     thread_exists,
 )
-from ..config.settings import get_config_dir
 from ..stream.events import stream_agent_events
-from ..stream.state import StreamState, _INTERNAL_TOOLS
+from ..stream.state import _INTERNAL_TOOLS, StreamState
+from ._constants import LOGO_GRADIENT, LOGO_LINES, WELCOME_SLOGANS, build_metadata
+from .channel import (
+    ChannelMessage,
+    _auto_start_channel,
+    _channels_is_running,
+    _channels_running_list,
+    _channels_stop,
+    _message_queue,
+    _set_channel_response,
+)
 from .history_suggester import HistorySuggester
-
-from ..commands import manager as cmd_manager, CommandContext
-from ._constants import LOGO_LINES, LOGO_GRADIENT, WELCOME_SLOGANS, build_metadata
 
 _channel_logger = logging.getLogger(__name__)
 
@@ -179,16 +181,16 @@ def run_textual_interactive(
 
         from .clipboard import copy_selection_to_clipboard, get_clipboard_text
         from .widgets import (
-            LoadingWidget,
-            ThinkingWidget,
-            SummarizationWidget,
             AssistantMessage,
-            ToolCallWidget,
+            LoadingWidget,
             SubAgentWidget,
-            TodoWidget,
-            UserMessage,
+            SummarizationWidget,
             SystemMessage,
+            ThinkingWidget,
+            TodoWidget,
+            ToolCallWidget,
             UsageWidget,
+            UserMessage,
         )
     except Exception as e:  # pragma: no cover - runtime fallback path
         raise RuntimeError(
@@ -376,11 +378,11 @@ def run_textual_interactive(
                 _ch_mod._cli_thread_id = self._conversation_tid
             self._render_welcome()
             self._render_status()
-            self.append_system(
-                f"New session: {self._conversation_tid}", style="green"
-            )
+            self.append_system(f"New session: {self._conversation_tid}", style="green")
 
-        async def handle_session_resume(self, thread_id: str, workspace_dir: str | None = None) -> None:
+        async def handle_session_resume(
+            self, thread_id: str, workspace_dir: str | None = None
+        ) -> None:
             if workspace_dir:
                 self._workspace_dir = workspace_dir
 
@@ -502,7 +504,7 @@ def run_textual_interactive(
             self._approval_future = asyncio.get_event_loop().create_future()
             try:
                 return await asyncio.wait_for(self._approval_future, timeout=300)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 return None
             finally:
                 self._approval_future = None
@@ -524,7 +526,7 @@ def run_textual_interactive(
 
             try:
                 result = await asyncio.wait_for(self._ask_user_future, timeout=300)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 ask_w.action_cancel()
                 return {"status": "cancelled"}
             finally:
@@ -546,7 +548,7 @@ def run_textual_interactive(
             self._picker_future = asyncio.get_event_loop().create_future()
             try:
                 return await asyncio.wait_for(self._picker_future, timeout=120)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 return None
             finally:
                 self._picker_future = None
@@ -574,7 +576,7 @@ def run_textual_interactive(
             self._browser_future = asyncio.get_event_loop().create_future()
             try:
                 return await asyncio.wait_for(self._browser_future, timeout=300)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 return None
             finally:
                 self._browser_future = None
@@ -1055,7 +1057,9 @@ def run_textual_interactive(
                                     except Exception:
                                         pass
                                     _prompt.disabled = False
-                                from langgraph.types import Command  # type: ignore[import-untyped]
+                                from langgraph.types import (
+                                    Command,  # type: ignore[import-untyped]
+                                )
 
                                 _stream_input = Command(resume=result)
                                 _hitl_resuming = True
@@ -1067,7 +1071,9 @@ def run_textual_interactive(
 
                             # HITL: check session auto-approve first
                             if self._hitl_auto_approve:
-                                from langgraph.types import Command  # type: ignore[import-untyped]
+                                from langgraph.types import (
+                                    Command,  # type: ignore[import-untyped]
+                                )
 
                                 _stream_input = Command(
                                     resume={
@@ -1090,7 +1096,9 @@ def run_textual_interactive(
                                     action_reqs,
                                 )
                                 if decisions is not None:
-                                    from langgraph.types import Command  # type: ignore[import-untyped]
+                                    from langgraph.types import (
+                                        Command,  # type: ignore[import-untyped]
+                                    )
 
                                     _stream_input = Command(
                                         resume={"decisions": decisions}
@@ -1123,7 +1131,9 @@ def run_textual_interactive(
                             if decided_event and decided_event.decisions is not None:
                                 if decided_event.auto_approve_session:
                                     self._hitl_auto_approve = True
-                                from langgraph.types import Command  # type: ignore[import-untyped]
+                                from langgraph.types import (
+                                    Command,  # type: ignore[import-untyped]
+                                )
 
                                 _stream_input = Command(
                                     resume={"decisions": decided_event.decisions}
@@ -1392,7 +1402,7 @@ def run_textual_interactive(
                 return _ch_mod.channel_ask_user_prompt(ask_user_data, msg)
 
             from ..commands.channel_ui import ChannelCommandUI
-            
+
             # Handle slash commands from channel
             if msg.content.strip().startswith("/"):
                 ctx = CommandContext(
@@ -1412,7 +1422,9 @@ def run_textual_interactive(
                         f"[{msg.channel_type}: Executed command from {msg.sender}]",
                         style="dim",
                     )
-                    _set_channel_response(msg.msg_id, f"Command executed: {msg.content}")
+                    _set_channel_response(
+                        msg.msg_id, f"Command executed: {msg.content}"
+                    )
                     self._busy = False
                     self._render_status()
                     prompt_widget.disabled = False
@@ -1841,6 +1853,7 @@ def run_textual_interactive(
     ) -> None:
         """Check tool calls for media files and forward to channel."""
         import os
+
         from ..paths import resolve_virtual_path
 
         arg_key = "path" if tool_name == "write_file" else "file_path"
